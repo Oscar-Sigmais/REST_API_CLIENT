@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const redisClient = require('../utils/redisClient');
 const formatDocument = require('../utils/formatDocument');
+const ApiKey = require('../models/ApiKey');
 
 exports.getDeviceAlerts = async (req, res) => {
     const collectionMap = {
@@ -20,12 +21,57 @@ exports.getDeviceAlerts = async (req, res) => {
         return res.status(400).json({ status: 'error', message: 'Invalid collection name' });
     }
 
-    // Obter a coleção MongoDB
     const mongoCollection = mongoose.connection.collection(collectionMap[collection]);
     const cacheKey = `alerts:${collection}:${JSON.stringify(req.query)}`;
     console.log('Cache Key:', cacheKey);
 
     try {
+        const { uuid, start_date, end_date, page = 1, size = 10, ...otherFilters } = req.query;
+        const apiKey = req.headers['x-api-key'];
+        const companyId = req.headers['x-company-id'];
+
+        // Validar presença dos campos obrigatórios
+        if (!apiKey || !companyId || !uuid) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'API Key, Company ID, and UUID are required',
+            });
+        }
+
+        // Validar API Key
+        const apiKeyData = await ApiKey.findOne({ key: apiKey, companyId });
+        if (!apiKeyData) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'Invalid API Key or Company ID',
+            });
+        }
+
+        // Validar se o companyId é um ObjectId válido
+        let companyIdFilter;
+        try {
+            companyIdFilter = new mongoose.Types.ObjectId(companyId);
+        } catch (err) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid Company ID format',
+            });
+        }
+
+        // Verificar se o dispositivo pertence ao grupo correto
+        const groupsCollection = mongoose.connection.collection('groups');
+        const groupExists = await groupsCollection.findOne({
+            company_id: companyIdFilter,
+            'devices.uuid': uuid,
+        });
+
+        if (!groupExists) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Device UUID not found in groups for the specified company',
+            });
+        }
+
         // Verificar o cache no Redis
         const cachedData = await redisClient.get(cacheKey);
         if (cachedData) {
@@ -33,14 +79,6 @@ exports.getDeviceAlerts = async (req, res) => {
             return res.status(200).json(JSON.parse(cachedData));
         }
         console.log('Cache miss:', cacheKey);
-
-        const { start_date, end_date, uuid, page = 1, size = 10, ...otherFilters } = req.query;
-
-        // Validar UUID
-        if (!uuid) {
-            console.log('UUID parameter is required');
-            return res.status(400).json({ status: 'error', message: 'UUID parameter is required' });
-        }
 
         const filterQuery = { uuid };
 
@@ -67,10 +105,11 @@ exports.getDeviceAlerts = async (req, res) => {
         console.log('Final Filter Query:', JSON.stringify(filterQuery));
 
         // Paginação
-        const skip = (parseInt(page) - 1) * parseInt(size);
+        const limit = Math.min(parseInt(size, 10), 100); // Limitar a paginação a no máximo 100 registros
+        const skip = (parseInt(page, 10) - 1) * limit;
         console.log('Page:', page, 'Size:', size, 'Skip:', skip);
 
-        // Consulta ao MongoDB com ordenação decrescente
+        // Consulta ao MongoDB com ordenação crescente
         const total = await mongoCollection.countDocuments(filterQuery);
         console.log('Total records matching filter:', total);
 
@@ -78,7 +117,7 @@ exports.getDeviceAlerts = async (req, res) => {
             .find(filterQuery)
             .sort({ createdAt: 1 }) // Ordena pela data mais recente primeiro
             .skip(skip)
-            .limit(parseInt(size))
+            .limit(limit)
             .toArray();
 
         console.log('Data fetched from MongoDB:', data.length, 'records');
@@ -95,10 +134,10 @@ exports.getDeviceAlerts = async (req, res) => {
 
         const pagination = {
             total,
-            currentPage: parseInt(page),
-            totalPage: Math.ceil(total / size),
-            size: parseInt(size),
-            hasNextPage: page * size < total,
+            currentPage: parseInt(page, 10),
+            totalPage: Math.ceil(total / limit),
+            size: limit,
+            hasNextPage: page * limit < total,
             hasPrevPage: page > 1,
         };
 

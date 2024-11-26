@@ -67,7 +67,7 @@ A API está acessível publicamente através do DNS: `https://api.client.sigmais
 
 **Exemplo de Requisição:**
 ```bash
-curl --location 'https://api.client.sigmais.com.br/companies/data?name=Sigmais' --header 'x-api-key: SEU_API_KEY' --header 'x-company-id: COMPANY_ID'
+curl --location 'https://api.client.sigmais.com.br/companies/data?name=COMPANY' --header 'x-api-key: SEU_API_KEY' --header 'x-company-id: COMPANY_ID'
 ```
 
 ---
@@ -84,7 +84,7 @@ curl --location 'https://api.client.sigmais.com.br/companies/data?name=Sigmais' 
 
 **Exemplo de Requisição:**
 ```bash
-curl --location 'https://api.client.sigmais.com.br/groups/data?uuid=device123' --header 'x-api-key: SEU_API_KEY' --header 'x-company-id: COMPANY_ID'
+curl --location 'https://api.client.sigmais.com.br/groups/data?uuid=abc123' --header 'x-api-key: SEU_API_KEY' --header 'x-company-id: COMPANY_ID'
 ```
 
 ---
@@ -93,7 +93,13 @@ curl --location 'https://api.client.sigmais.com.br/groups/data?uuid=device123' -
 - **Rota:** `/<device_type>/device/resume`
 - **Método:** `GET`
 - **Parâmetros:**
-  - `uuid` (Obrigatório): Identificador único do dispositivo.
+   - `uuid` (Obrigatório): Identificador único do dispositivo.
+   - `device_type`(Obrigatório): Identificador único do tipo do produto.
+     - sigmeter
+     - sigmeteronoff
+     - sigmeterlora
+     - sigpulse
+     - sigpark
 - **Cabeçalhos:**
   - `x-api-key`: Chave de autenticação.
   - `x-company-id`: Identificador único da empresa.
@@ -110,6 +116,12 @@ curl --location 'https://api.client.sigmais.com.br/sigmeter/device/resume?uuid=d
 - **Rota:** `/<device_type>/device/events`
 - **Método:** `GET`
 - **Parâmetros:**
+   - `device_type`(Obrigatório): Identificador único do tipo do produto.
+     - sigmeter
+     - sigmeteronoff
+     - sigmeterlora
+     - sigpulse
+     - sigpark
   - `uuid` (Obrigatório): Identificador único do dispositivo.
   - `start_date` (Obrigatório): Data inicial no formato ISO 8601.
   - `end_date` (Obrigatório): Data final no formato ISO 8601.
@@ -131,6 +143,12 @@ curl --location 'https://api.client.sigmais.com.br/sigmeter/device/events?uuid=d
 - **Rota:** `/<device_type>/device/alerts`
 - **Método:** `GET`
 - **Parâmetros:**
+   - `device_type`(Obrigatório): Identificador único do tipo do produto.
+     - sigmeter
+     - sigmeteronoff
+     - sigmeterlora
+     - sigpulse
+     - sigpark
   - `uuid` (Obrigatório): Identificador único do dispositivo.
   - `start_date` (Obrigatório): Data inicial no formato ISO 8601.
   - `end_date` (Obrigatório): Data final no formato ISO 8601.
