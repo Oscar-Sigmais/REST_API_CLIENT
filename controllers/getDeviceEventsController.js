@@ -1,7 +1,7 @@
 const redisClient = require('../utils/redisClient');
-const paginateQuery = require('../utils/paginateQuery');
-const formatDocument = require('../utils/formatDocument');
 const mongoose = require('mongoose');
+const formatDocument = require('../utils/formatDocument');
+const ApiKey = require('../models/ApiKey');
 
 exports.getDeviceEvents = async (req, res) => {
     const collectionMap = {
@@ -19,10 +19,57 @@ exports.getDeviceEvents = async (req, res) => {
         return res.status(400).json({ status: 'error', message: 'Invalid collection name' });
     }
 
-    const cacheKey = `events:${collectionName}:${JSON.stringify(req.query)}`;
-    console.log('Cache Key:', cacheKey);
-
     try {
+        const { uuid } = req.query;
+        const apiKey = req.headers['x-api-key'];
+        const companyId = req.headers['x-company-id'];
+
+        // Validar presença dos campos obrigatórios
+        if (!apiKey || !companyId || !uuid) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'API Key, Company ID, and UUID are required',
+            });
+        }
+
+        // Validar API Key
+        const apiKeyData = await ApiKey.findOne({ key: apiKey, companyId });
+        if (!apiKeyData) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'Invalid API Key or Company ID',
+            });
+        }
+
+        // Validar se o companyId é um ObjectId válido
+        let companyIdFilter;
+        try {
+            companyIdFilter = new mongoose.Types.ObjectId(companyId);
+        } catch (err) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid Company ID format',
+            });
+        }
+
+        // Verificar se o dispositivo pertence ao grupo correto
+        const groupsCollection = mongoose.connection.collection('groups');
+        const groupExists = await groupsCollection.findOne({
+            company_id: companyIdFilter,
+            'devices.uuid': uuid,
+        });
+
+        if (!groupExists) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Device UUID not found in groups for the specified company',
+            });
+        }
+
+        // Cache Key
+        const cacheKey = `events:${collectionName}:${JSON.stringify(req.query)}:${companyId}`;
+        console.log('Cache Key:', cacheKey);
+
         // Verificar o cache no Redis
         const cachedData = await redisClient.get(cacheKey);
         if (cachedData) {
@@ -32,24 +79,28 @@ exports.getDeviceEvents = async (req, res) => {
         console.log('Cache miss:', cacheKey);
 
         const mongoCollection = mongoose.connection.collection(collectionName);
+
+        // Paginação com limite de tamanho
         const page = parseInt(req.query.page || 1);
-        const size = parseInt(req.query.size || 10);
-        const filterQuery = {};
+        let size = parseInt(req.query.size || 10);
 
-        console.log('Page:', page, 'Size:', size);
-
-        // Filtro por UUID
-        if (req.query.uuid) {
-            filterQuery['metadata.deviceUUID'] = req.query.uuid;
-            console.log('UUID filter applied:', filterQuery['metadata.deviceUUID']);
+        // Limitar tamanho máximo da página em 100
+        if (size > 100) {
+            size = 100;
         }
+
+        const skip = (page - 1) * size;
+
+        // Construir filtro de pesquisa
+        const filterQuery = { 'metadata.deviceUUID': uuid };
+        console.log('UUID filter applied:', filterQuery['metadata.deviceUUID']);
 
         // Filtro de datas
         if (req.query.start_date && req.query.end_date) {
             const startDate = new Date(req.query.start_date);
             const endDate = new Date(req.query.end_date);
 
-            // Validar datas
+            // Validar formato das datas
             if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
                 console.log('Invalid date format:', req.query.start_date, req.query.end_date);
                 return res.status(400).json({ status: 'error', message: 'Invalid date format. Use ISO 8601.' });
@@ -64,24 +115,17 @@ exports.getDeviceEvents = async (req, res) => {
 
         console.log('Final Filter Query:', filterQuery);
 
-        // Paginação
-        const skip = (page - 1) * size;
-        console.log('Skip:', skip);
-
-        // Consulta ao MongoDB com ordenação decrescente
+        // Consulta ao MongoDB
         const total = await mongoCollection.countDocuments(filterQuery);
         console.log('Total records matching filter:', total);
 
         const data = await mongoCollection
             .find(filterQuery)
-            .sort({ timestamp: 1 }) // Ordena pela data mais recente primeiro
+            .sort({ timestamp: 1 }) // Ordena pela data mais recente
             .skip(skip)
             .limit(size)
             .toArray();
 
-        console.log('Data fetched from MongoDB:', data.length, 'records');
-
-        // Verificar se encontrou resultados
         if (data.length === 0) {
             console.log('No data found for filter:', filterQuery);
             return res.status(404).json({ status: 'error', message: 'No data found for the given filters.' });
@@ -89,7 +133,6 @@ exports.getDeviceEvents = async (req, res) => {
 
         // Formatar os documentos
         const formattedData = data.map(formatDocument);
-        console.log('Formatted data:', formattedData.length, 'records');
 
         const pagination = {
             total,
@@ -102,7 +145,7 @@ exports.getDeviceEvents = async (req, res) => {
 
         const result = {
             status: 'success',
-            message: `${data.length} record(s) found.`,
+            message: `${data.length} records return, max 100.`,
             data: formattedData,
             pagination,
         };

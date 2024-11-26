@@ -1,25 +1,25 @@
 const ApiKey = require('../models/ApiKey');
 
 const validateApiKey = async (req, res, next) => {
-    const apiKey = req.headers['x-api-key']; // API Key no cabeçalho
-    const companyId = req.headers['x-company-id']; // ID da empresa no cabeçalho
+    const apiKey = req.headers['x-api-key'];
+    const companyId = req.headers['x-company-id'];
 
     if (!apiKey || !companyId) {
         return res.status(401).json({ error: 'API Key and Company ID are required' });
     }
 
     try {
-        const keyData = await ApiKey.findOne({ key: apiKey, companyId });
+        const keyData = await ApiKey.findOne({ key: apiKey, companyId, isActive: true });
 
         if (!keyData) {
-            return res.status(401).json({ error: 'Invalid API Key or Company ID' });
+            return res.status(401).json({ error: 'Invalid or inactive API Key' });
         }
 
         if (keyData.expiresAt < new Date()) {
             return res.status(401).json({ error: 'API Key expired' });
         }
 
-        req.companyId = companyId; // Anexar o ID da empresa à requisição
+        req.companyId = companyId; // Anexa o ID da empresa à requisição
         next();
     } catch (err) {
         console.error(err);

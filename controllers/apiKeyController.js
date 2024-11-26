@@ -10,18 +10,15 @@ const generateOrReturnApiKey = async (req, res) => {
     }
 
     try {
-        // Verificar se já existe uma chave válida para a empresa
-        const existingKey = await ApiKey.findOne({ companyId, expiresAt: { $gt: new Date() } });
-        if (existingKey) {
-            return res.status(200).json({ apiKey: existingKey.key });
-        }
+        // Desativar todas as chaves antigas da empresa
+        await ApiKey.updateMany({ companyId }, { isActive: false });
 
         // Gerar nova API Key
         const key = crypto.randomBytes(32).toString('hex');
         const expiresAt = new Date();
         expiresAt.setFullYear(expiresAt.getFullYear() + 1); // Validade de 1 ano
 
-        const newApiKey = new ApiKey({ key, companyId, expiresAt });
+        const newApiKey = new ApiKey({ key, companyId, expiresAt, isActive: true });
         await newApiKey.save();
 
         res.status(201).json({ apiKey: key });
@@ -30,5 +27,6 @@ const generateOrReturnApiKey = async (req, res) => {
         res.status(500).json({ error: 'Failed to generate API Key' });
     }
 };
+
 
 module.exports = { generateOrReturnApiKey };
