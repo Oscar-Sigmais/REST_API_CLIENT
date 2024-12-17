@@ -97,31 +97,96 @@ exports.getDeviceEvents = async (req, res) => {
             return res.status(404).json({ status: 'error', message: 'No data found for the given filters.' });
         }
 
-        const formattedData = data
-            .filter(item => [1, 2, 3, 7].includes(item.metadata.frame))
-            .map(item => ({
+        let formattedData;
+
+        // Tratamento específico para 'sigmeter'
+        if (req.params.collection === 'sigmeter') {
+            formattedData = data.filter(item => [1, 2, 3, 7].includes(item.metadata.frame))
+                .map(item => ({
+                    timestamp: item.timestamp,
+                    device_Id: item.metadata.deviceId,
+                    device_uuid: item.metadata.deviceUUID,
+                    analise: (() => {
+                        switch (item.metadata.frame) {
+                            case 1: return 'temperatura';
+                            case 2: return 'contador';
+                            case 3: return 'parametros';
+                            case 7: return 'sensor_Id';
+                        }
+                    })(),
+                    mensagem: item.event.input.message,
+                    umidade_ambiente: item.event.input.data.humidity,
+                    temperatura_ambiente: item.event.input.data.temperature,
+                    temperatura_canal_1: item.event.input.data.temperatureEx1 === -128 ? '' : item.event.input.data.temperatureEx1,
+                    temperatura_canal_2: item.event.input.data.temperatureEx2 === -128 ? '' : item.event.input.data.temperatureEx2,
+                    contagem_canal_1: item.event.input.data.count1,
+                    contagem_canal_2: item.event.input.data.count2,
+                    acumulado_canal_1: item.event.input.data.timeCount1,
+                    acumulado_canal_2: item.event.input.data.timeCount2,
+                    sensorUUID: item.event.input.data.sensorUid,
+                }));
+        } 
+        // Tratamento específico para 'sigmeterlora'
+        else if (req.params.collection === 'sigmeterlora') {
+            formattedData = data.map(item => ({
                 timestamp: item.timestamp,
                 device_Id: item.metadata.deviceId,
                 device_uuid: item.metadata.deviceUUID,
-                analise: (() => {
-                    switch (item.metadata.frame) {
-                        case 1: return 'temperatura';
-                        case 2: return 'contador';
-                        case 3: return 'parametros';
-                        case 7: return 'sensor_Id';
-                    }
-                })(),
-                mensagem: item.event.input.message,
-                umidade_ambiente: item.event.input.data.humidity,
-                temperatura_ambiente: item.event.input.data.temperature,
-                temperatura_canal_1: item.event.input.data.temperatureEx1 === -128 ? 'N_D' : item.event.input.data.temperatureEx1,
-                temperatura_canal_2: item.event.input.data.temperatureEx2 === -128 ? 'N_D' : item.event.input.data.temperatureEx2,
-                contagem_canal_1: item.event.input.data.count1,
-                contagem_canal_2: item.event.input.data.count2,
-                Acumulado_canal_1: item.event.input.data.timeCount1,
-                Acumulado_canal_2: item.event.input.data.timeCount2,
-                sensorUUID: item.event.input.data.sensorUid,
+                analise: 'temperatura',
+                umidade_ambiente: item.event.input.data.data.ui,
+                temperatura_ambiente: item.event.input.data.data.ti,
+                temperatura_canal_1: item.event.input.data.data.tp1,
+                temperatura_canal_2: item.event.input.data.data.tp2,
+                sensorUUID_1: item.event.input.data.data.sensorUid1,
+                sensorUUID_2: item.event.input.data.data.sensorUid2,
             }));
+        } 
+        // Tratamento específico para 'sigmeter4a20'
+        else if (req.params.collection === 'sigmeter4a20') {
+            formattedData = data.map(item => ({
+                timestamp: item.timestamp,
+                device_Id: item.metadata.deviceId,
+                device_uuid: item.metadata.deviceUUID,
+                analise: 'corrente',
+                miliAmpere: item.event.input.data.mA,
+                miliVolt: item.event.input.data.mV,
+                bits_16: item.event.input.data.b16,
+            }));
+        } 
+        // Tratamento específico para 'sigmeteronoff'
+        else if (req.params.collection === 'sigmeteronoff') {
+            formattedData = data.map(item => ({
+                timestamp: item.timestamp,
+                device_Id: item.metadata.deviceId,
+                device_uuid: item.metadata.deviceUUID,
+                analise: 'on_off',
+                status_porta_1: item.event.input.data.s1,
+                status_porta_2: item.event.input.data.s2,
+                temperatura_ambiente: item.event.input.data.tmp,
+                umidade_ambiente: item.event.input.data.hum,
+            }));
+        } 
+        // Tratamento específico para 'sigpulse'
+        else if (req.params.collection === 'sigpulse') {
+            formattedData = data.map(item => ({
+                timestamp: item.timestamp,
+                device_Id: item.metadata.deviceId,
+                device_uuid: item.metadata.deviceUUID,
+                analise: 'contador',
+                contador_porta_1: item.event.input.data.c1,
+                contador_porta_2: item.event.input.data.c2,
+                temperatura_ambiente: item.event.input.data.tmp,
+                umidade_ambiente: item.event.input.data.hum,
+            }));
+        } 
+        // Tratamento padrão para outras coleções
+        else {
+            formattedData = data.map(item => ({
+                timestamp: item.timestamp,
+                metadata: item.metadata,
+                event: item.event,
+            }));
+        }
 
         const pagination = {
             total: formattedData.length,
@@ -139,7 +204,7 @@ exports.getDeviceEvents = async (req, res) => {
             pagination,
         };
 
-        await redisClient.set(cacheKey, JSON.stringify(result), { EX: 3600 });
+        await redisClient.set(cacheKey, JSON.stringify(result), { EX: 600 });
 
         return res.status(200).json(result);
     } catch (err) {
