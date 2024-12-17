@@ -1,20 +1,25 @@
 const mongoose = require('mongoose');
-const formatDocument = require('../utils/formatDocument');
 const ApiKey = require('../models/ApiKey'); // Modelo para validação da API Key
 
-// Rota para obter o resumo de dispositivos
+const COLLECTIONS = [
+    { name: 'sigmeterloras', deviceType: 'sigmeterlora' },
+    { name: 'sigmeter4a20', deviceType: 'sigmeter4a20' },
+    { name: 'sigmeters', deviceType: 'sigmeter' },
+    { name: 'sigmetersls', deviceType: 'sigmeteronoff' },
+    { name: 'sigpulses', deviceType: 'sigpulse' }
+];
+
 const getDeviceResume = async (req, res) => {
     try {
-        const { collection } = req.params;
-        const { uuid } = req.query;
+        const { uuid, name, _id } = req.query;
         const apiKey = req.headers['x-api-key'];
         const companyId = req.headers['x-company-id'];
 
         // Validar presença dos cabeçalhos obrigatórios
-        if (!apiKey || !companyId || !uuid) {
+        if (!apiKey || !companyId || (!uuid && !name && !_id)) {
             return res.status(400).json({
                 status: 'error',
-                message: 'API Key, Company ID, and UUID are required',
+                message: 'API Key, Company ID, and at least one search parameter (uuid, name, _id) are required',
             });
         }
 
@@ -27,77 +32,67 @@ const getDeviceResume = async (req, res) => {
             });
         }
 
-        // Validar se o companyId é um ObjectId válido
+        // Validar companyId
         let companyIdFilter;
         try {
             companyIdFilter = new mongoose.Types.ObjectId(companyId);
-        } catch (err) {
+        } catch {
             return res.status(400).json({
                 status: 'error',
                 message: 'Invalid Company ID format',
             });
         }
 
-        // Verificar se o dispositivo pertence ao grupo correto
-        const groupsCollection = mongoose.connection.collection('groups');
-        const groupExists = await groupsCollection.findOne({
-            company_id: companyIdFilter,
-            'devices.uuid': uuid,
-        });
+        // Filtro de busca
+        const searchQuery = {};
+        if (uuid) searchQuery.uuid = uuid;
+        if (name) searchQuery.name = name;
+        if (_id) searchQuery._id = new mongoose.Types.ObjectId(_id);
 
-        if (!groupExists) {
-            return res.status(404).json({
-                status: 'error',
-                message: 'Device UUID not found in groups for the specified company',
-            });
+        let result = [];
+        let collectionFound = null;
+
+        // Iterar em todas as coleções
+        for (const { name: collectionName, deviceType } of COLLECTIONS) {
+            const collection = mongoose.connection.collection(collectionName);
+            const data = await collection.find(searchQuery).toArray();
+
+            if (data.length > 0) {
+                // Verificar se o dispositivo pertence à empresa
+                const groupsCollection = mongoose.connection.collection('groups');
+                const validGroup = await groupsCollection.findOne({
+                    company_id: companyIdFilter,
+                    'devices.uuid': { $in: data.map((device) => device.uuid) },
+                });
+
+                if (validGroup) {
+                    result = data.map((device) => ({
+                        uuid: device.uuid || null,
+                        name: device.name || null,
+                        id: device._id || null,
+                        device_type: deviceType,
+                        createdAt: device.createdAt || null,
+                    }));
+                    collectionFound = collectionName;
+                    break;
+                }
+            }
         }
 
-        // Se passar pela validação, prosseguir com a pesquisa na coleção de dispositivos
-        const collectionName = collection !== 'sigmeter4a20' ? `${collection}s` : collection;
-        const mongoCollection = mongoose.connection.collection(collectionName);
-
-        // Configuração de paginação
-        const page = parseInt(req.query.page || 1);
-        const size = parseInt(req.query.size || 10);
-        const skip = (page - 1) * size;
-
-        // Filtro de busca nos dispositivos
-        const filterQuery = { uuid };
-        const total = await mongoCollection.countDocuments(filterQuery);
-        const data = await mongoCollection
-            .find(filterQuery)
-            .skip(skip)
-            .limit(size)
-            .sort({ _id: -1 })
-            .toArray();
-
-        if (data.length === 0) {
+        if (result.length === 0) {
             return res.status(404).json({
                 status: 'error',
-                message: 'Device not found in the specified company or type',
+                message: 'Device not found in any collection for the specified company',
             });
         }
-
-        // Formatar os resultados
-        const formattedData = data.map(formatDocument);
-
-        // Construir a paginação
-        const pagination = {
-            total,
-            currentPage: page,
-            totalPage: Math.ceil(total / size),
-            size,
-            hasNextPage: page * size < total,
-            hasPrevPage: page > 1,
-        };
 
         return res.status(200).json({
             status: 'success',
-            data: formattedData,
-            pagination,
+            collection: collectionFound,
+            data: result,
         });
     } catch (err) {
-        console.error('Erro durante a requisição:', err);
+        console.error('Error during the request:', err);
         return res.status(500).json({ status: 'error', message: err.message });
     }
 };
