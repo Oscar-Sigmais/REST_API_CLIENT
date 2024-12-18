@@ -26,7 +26,7 @@ app.use('/api-key', apiKeyRoutes);
 // Rotas principais
 app.get('/companies/data', validateApiKey, getCompanies);
 app.get('/groups/data', validateApiKey, getGroups);
-app.get('/:collection/device/resume', validateApiKey, getDeviceResume);
+app.get('/device/resume', validateApiKey, getDeviceResume);
 app.get('/:collection/device/events', validateApiKey, getDeviceEvents);
 app.get('/:collection/device/alerts', validateApiKey, getDeviceAlerts);
 app.get('/version', (req, res) => {
