@@ -27,8 +27,8 @@ app.use('/api-key', apiKeyRoutes);
 app.get('/companies/data', validateApiKey, getCompanies);
 app.get('/groups/data', validateApiKey, getGroups);
 app.get('/device/resume', validateApiKey, getDeviceResume);
-app.get('/:collection/device/events', validateApiKey, getDeviceEvents);
-app.get('/:collection/device/alerts', validateApiKey, getDeviceAlerts);
+app.get('/device/events', validateApiKey, getDeviceEvents);
+app.get('/device/alerts', validateApiKey, getDeviceAlerts);
 app.get('/version', (req, res) => {
     res.json({ version: packageJson.version });
 });

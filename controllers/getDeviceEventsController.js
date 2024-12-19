@@ -12,11 +12,6 @@ exports.getDeviceEvents = async (req, res) => {
         sigmeter4a20: 'sigmeter4a20_events',
     };
 
-    const collectionName = collectionMap[req.params.collection];
-    if (!collectionName) {
-        return res.status(400).json({ status: 'error', message: 'Invalid collection name' });
-    }
-
     try {
         const { uuid } = req.query;
         const apiKey = req.headers['x-api-key'];
@@ -60,147 +55,147 @@ exports.getDeviceEvents = async (req, res) => {
             });
         }
 
-        const cacheKey = `events:${collectionName}:${JSON.stringify(req.query)}:${companyId}`;
+        const cacheKey = `events:${uuid}:${JSON.stringify(req.query)}:${companyId}`;
         const cachedData = await redisClient.get(cacheKey);
         if (cachedData) {
             return res.status(200).json(JSON.parse(cachedData));
         }
 
-        const mongoCollection = mongoose.connection.collection(collectionName);
         const page = parseInt(req.query.page || 1);
         let size = parseInt(req.query.size || 10);
 
         if (size > 100) size = 100;
 
         const skip = (page - 1) * size;
-        const filterQuery = { 'metadata.deviceUUID': uuid };
+        let data = null;
+        let deviceType = null;
+        let formattedData = [];
+        let totalRecords = 0;
 
-        if (req.query.start_date && req.query.end_date) {
-            const startDate = new Date(req.query.start_date);
-            const endDate = new Date(req.query.end_date);
+        for (const [key, collectionName] of Object.entries(collectionMap)) {
+            const mongoCollection = mongoose.connection.collection(collectionName);
 
-            if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-                return res.status(400).json({ status: 'error', message: 'Invalid date format. Use ISO 8601.' });
+            const filterQuery = { 'metadata.deviceUUID': uuid };
+
+            if (req.query.start_date && req.query.end_date) {
+                const startDate = new Date(req.query.start_date);
+                const endDate = new Date(req.query.end_date);
+
+                if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+                    return res.status(400).json({ status: 'error', message: 'Invalid date format. Use ISO 8601.' });
+                }
+
+                filterQuery.timestamp = { $gte: startDate, $lte: endDate };
             }
 
-            filterQuery.timestamp = { $gte: startDate, $lte: endDate };
+            totalRecords = await mongoCollection.countDocuments(filterQuery);
+
+            data = await mongoCollection
+                .find(filterQuery)
+                .sort({ timestamp: 1 })
+                .skip(skip)
+                .limit(size)
+                .toArray();
+
+            if (data.length > 0) {
+                deviceType = key;
+                if (deviceType === 'sigmeter') {
+                    formattedData = data.filter(item => [1, 2, 3, 7].includes(item.metadata.frame))
+                        .map(item => ({
+                            timestamp: item.timestamp,
+                            device_type: 'sigmeter',
+                            device_Id: item.metadata.deviceId,
+                            device_uuid: item.metadata.deviceUUID,
+                            analise: (() => {
+                                switch (item.metadata.frame) {
+                                    case 1: return 'temperatura';
+                                    case 2: return 'contador';
+                                    case 3: return 'parametros';
+                                    case 7: return 'sensor_Id';
+                                }
+                            })(),
+                            umidade_ambiente: item.event.input.data.humidity,
+                            temperatura_ambiente: item.event.input.data.temperature,
+                            temperatura_canal_1: item.event.input.data.temperatureEx1 === -128 ? '' : item.event.input.data.temperatureEx1,
+                            temperatura_canal_2: item.event.input.data.temperatureEx2 === -128 ? '' : item.event.input.data.temperatureEx2,
+                            contagem_canal_1: item.event.input.data.count1,
+                            contagem_canal_2: item.event.input.data.count2,
+                            acumulado_canal_1: item.event.input.data.timeCount1,
+                            acumulado_canal_2: item.event.input.data.timeCount2,
+                            sensorUUID: item.event.input.data.sensorUid,
+                        }));
+                } else if (deviceType === 'sigmeterlora') {
+                    formattedData = data.map(item => ({
+                        timestamp: item.timestamp,
+                        device_type: 'sigmeterlora',
+                        device_Id: item.metadata.deviceId,
+                        device_uuid: item.metadata.deviceUUID,
+                        analise: 'temperatura',
+                        umidade_ambiente: item.event.input.data.data.ui,
+                        temperatura_ambiente: item.event.input.data.data.ti,
+                        temperatura_canal_1: item.event.input.data.data.tp1,
+                        temperatura_canal_2: item.event.input.data.data.tp2,
+                        sensorUUID_1: item.event.input.data.data.sensorUid1,
+                        sensorUUID_2: item.event.input.data.data.sensorUid2,
+                    }));
+                } else if (deviceType === 'sigmeter4a20') {
+                    formattedData = data.map(item => ({
+                        timestamp: item.timestamp,
+                        device_type: 'sigmeter4a20',
+                        device_Id: item.metadata.deviceId,
+                        device_uuid: item.metadata.deviceUUID,
+                        analise: 'corrente',
+                        miliAmpere: item.event.input.data.mA,
+                        miliVolt: item.event.input.data.mV,
+                        bits_16: item.event.input.data.b16,
+                    }));
+                } else if (deviceType === 'sigmeteronoff') {
+                    formattedData = data.map(item => ({
+                        timestamp: item.timestamp,
+                        device_type: 'sigmeteronoff',
+                        device_Id: item.metadata.deviceId,
+                        device_uuid: item.metadata.deviceUUID,
+                        analise: 'on_off',
+                        status_porta_1: item.event.input.data.s1,
+                        status_porta_2: item.event.input.data.s2,
+                        temperatura_ambiente: item.event.input.data.tmp,
+                        umidade_ambiente: item.event.input.data.hum,
+                    }));
+                } else if (deviceType === 'sigpulse') {
+                    formattedData = data.map(item => ({
+                        timestamp: item.timestamp,
+                        device_type: 'sigpulse',
+                        device_Id: item.metadata.deviceId,
+                        device_uuid: item.metadata.deviceUUID,
+                        analise: 'contador',
+                        contador_porta_1: item.event.input.data.c1,
+                        contador_porta_2: item.event.input.data.c2,
+                        temperatura_ambiente: item.event.input.data.tmp,
+                        umidade_ambiente: item.event.input.data.hum,
+                    }));
+                }
+                break;
+            }
         }
 
-        const data = await mongoCollection
-            .find(filterQuery)
-            .sort({ timestamp: 1 })
-            .skip(skip)
-            .limit(size)
-            .toArray();
-
-        if (data.length === 0) {
+        if (!data || data.length === 0) {
             return res.status(404).json({ status: 'error', message: 'No data found for the given filters.' });
         }
 
-        let formattedData;
-
-        // Tratamento específico para 'sigmeter'
-        if (req.params.collection === 'sigmeter') {
-            formattedData = data.filter(item => [1, 2, 3, 7].includes(item.metadata.frame))
-                .map(item => ({
-                    timestamp: item.timestamp,
-                    device_Id: item.metadata.deviceId,
-                    device_uuid: item.metadata.deviceUUID,
-                    analise: (() => {
-                        switch (item.metadata.frame) {
-                            case 1: return 'temperatura';
-                            case 2: return 'contador';
-                            case 3: return 'parametros';
-                            case 7: return 'sensor_Id';
-                        }
-                    })(),
-                    mensagem: item.event.input.message,
-                    umidade_ambiente: item.event.input.data.humidity,
-                    temperatura_ambiente: item.event.input.data.temperature,
-                    temperatura_canal_1: item.event.input.data.temperatureEx1 === -128 ? '' : item.event.input.data.temperatureEx1,
-                    temperatura_canal_2: item.event.input.data.temperatureEx2 === -128 ? '' : item.event.input.data.temperatureEx2,
-                    contagem_canal_1: item.event.input.data.count1,
-                    contagem_canal_2: item.event.input.data.count2,
-                    acumulado_canal_1: item.event.input.data.timeCount1,
-                    acumulado_canal_2: item.event.input.data.timeCount2,
-                    sensorUUID: item.event.input.data.sensorUid,
-                }));
-        } 
-        // Tratamento específico para 'sigmeterlora'
-        else if (req.params.collection === 'sigmeterlora') {
-            formattedData = data.map(item => ({
-                timestamp: item.timestamp,
-                device_Id: item.metadata.deviceId,
-                device_uuid: item.metadata.deviceUUID,
-                analise: 'temperatura',
-                umidade_ambiente: item.event.input.data.data.ui,
-                temperatura_ambiente: item.event.input.data.data.ti,
-                temperatura_canal_1: item.event.input.data.data.tp1,
-                temperatura_canal_2: item.event.input.data.data.tp2,
-                sensorUUID_1: item.event.input.data.data.sensorUid1,
-                sensorUUID_2: item.event.input.data.data.sensorUid2,
-            }));
-        } 
-        // Tratamento específico para 'sigmeter4a20'
-        else if (req.params.collection === 'sigmeter4a20') {
-            formattedData = data.map(item => ({
-                timestamp: item.timestamp,
-                device_Id: item.metadata.deviceId,
-                device_uuid: item.metadata.deviceUUID,
-                analise: 'corrente',
-                miliAmpere: item.event.input.data.mA,
-                miliVolt: item.event.input.data.mV,
-                bits_16: item.event.input.data.b16,
-            }));
-        } 
-        // Tratamento específico para 'sigmeteronoff'
-        else if (req.params.collection === 'sigmeteronoff') {
-            formattedData = data.map(item => ({
-                timestamp: item.timestamp,
-                device_Id: item.metadata.deviceId,
-                device_uuid: item.metadata.deviceUUID,
-                analise: 'on_off',
-                status_porta_1: item.event.input.data.s1,
-                status_porta_2: item.event.input.data.s2,
-                temperatura_ambiente: item.event.input.data.tmp,
-                umidade_ambiente: item.event.input.data.hum,
-            }));
-        } 
-        // Tratamento específico para 'sigpulse'
-        else if (req.params.collection === 'sigpulse') {
-            formattedData = data.map(item => ({
-                timestamp: item.timestamp,
-                device_Id: item.metadata.deviceId,
-                device_uuid: item.metadata.deviceUUID,
-                analise: 'contador',
-                contador_porta_1: item.event.input.data.c1,
-                contador_porta_2: item.event.input.data.c2,
-                temperatura_ambiente: item.event.input.data.tmp,
-                umidade_ambiente: item.event.input.data.hum,
-            }));
-        } 
-        // Tratamento padrão para outras coleções
-        else {
-            formattedData = data.map(item => ({
-                timestamp: item.timestamp,
-                metadata: item.metadata,
-                event: item.event,
-            }));
-        }
-
         const pagination = {
-            total: formattedData.length,
+            total: totalRecords,
             currentPage: page,
-            totalPage: Math.ceil(formattedData.length / size),
+            totalPage: Math.ceil(totalRecords / size),
             size,
-            hasNextPage: page * size < formattedData.length,
+            hasNextPage: page * size < totalRecords,
             hasPrevPage: page > 1,
         };
 
         const result = {
             status: 'success',
-            message: `${formattedData.length} records return, max 100.`,
+            message: `${formattedData.length} records returned, max 100.`,
             data: formattedData,
+            deviceType,
             pagination,
         };
 
