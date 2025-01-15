@@ -10,6 +10,7 @@ const { getGroups } = require('./controllers/getDevicesGroupsController');
 const { getDeviceEvents } = require('./controllers/getDeviceEventsController');
 const { getDeviceAlerts } = require('./controllers/getDeviceAlertsController');
 const { getDeviceResume } = require('./controllers/getDeviceResumeController');
+const { getAllDevicesResume } = require('./controllers/getAllDevicesController');
 const path = require('path');
 const packageJson = require(path.join(__dirname, 'package.json'));
 
@@ -27,6 +28,7 @@ app.use('/api-key', apiKeyRoutes);
 app.get('/companies/data', validateApiKey, getCompanies);
 app.get('/groups/data', validateApiKey, getGroups);
 app.get('/device/resume', validateApiKey, getDeviceResume);
+app.get('/all/devices/resume', validateApiKey, getAllDevicesResume)
 app.get('/device/events', validateApiKey, getDeviceEvents);
 app.get('/device/alerts', validateApiKey, getDeviceAlerts);
 app.get('/version', (req, res) => {
