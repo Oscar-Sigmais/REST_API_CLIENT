@@ -13,6 +13,8 @@ const getAllDevicesResume = async (req, res) => {
     try {
         const apiKey = req.headers['x-api-key'];
         const companyId = req.headers['x-company-id'];
+        const onlineTime = parseInt(req.query.onlineTime, 10); // Filtro opcional para dispositivos online
+        const offlineTime = parseInt(req.query.offlineTime, 10); // Filtro opcional para dispositivos offline
 
         // Validação inicial
         if (!apiKey || !companyId) {
@@ -52,10 +54,32 @@ const getAllDevicesResume = async (req, res) => {
 
         let devices = [];
 
+        // Calcula os limites de tempo baseados em onlineTime e offlineTime
+        let onlineFilter = null;
+        if (onlineTime && !isNaN(onlineTime) && onlineTime >= 1 && onlineTime <= 2550) {
+            const now = new Date();
+            onlineFilter = new Date(now.getTime() - onlineTime * 60 * 60 * 1000);
+        }
+
+        let offlineFilter = null;
+        if (offlineTime && !isNaN(offlineTime) && offlineTime >= 1 && offlineTime <= 2550) {
+            const now = new Date();
+            offlineFilter = new Date(now.getTime() - offlineTime * 60 * 60 * 1000);
+        }
+
         // Itera em todas as coleções para buscar dispositivos pelos UUIDs
         for (const { name: collectionName } of COLLECTIONS) {
             const collection = mongoose.connection.collection(collectionName);
-            const collectionDevices = await collection.find({ uuid: { $in: uuids } }).toArray();
+
+            const query = { uuid: { $in: uuids } };
+            if (onlineFilter) {
+                query.updatedAt = { $gte: onlineFilter };
+            }
+            if (offlineFilter) {
+                query.updatedAt = { $lt: offlineFilter };
+            }
+
+            const collectionDevices = await collection.find(query).toArray();
 
             devices.push(
                 ...collectionDevices.map(device => ({
