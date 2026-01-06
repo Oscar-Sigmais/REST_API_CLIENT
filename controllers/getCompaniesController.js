@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const paginateQuery = require('../utils/paginateQuery'); // Função para paginação
-const formatDocument = require('../utils/formatDocument'); // Formatar documentos MongoDB
 
+// Coleção: companies (banco sighub)
 exports.getCompanies = async (req, res) => {
     try {
         const mongoCollection = mongoose.connection.collection('companies');
@@ -25,7 +25,7 @@ exports.getCompanies = async (req, res) => {
         const size = parseInt(req.query.size || 10);
 
         // Construir a consulta de filtro com companyId
-        const filterQuery = { _id: companyIdFilter }; // Filtra exclusivamente pelo ID da companhia
+        const filterQuery = { _id: companyIdFilter };
 
         // Consulta os dados paginados
         const { data, pagination } = await paginateQuery(mongoCollection, filterQuery, page, size);
@@ -35,8 +35,18 @@ exports.getCompanies = async (req, res) => {
             return res.status(404).json({ status: 'error', message: 'Company not found' });
         }
 
-        // Formatar os dados para evitar referências circulares
-        const formattedData = data.map(formatDocument);
+        // Formatar os dados para o padrão de saída
+        const formattedData = data.map(company => ({
+            _id: company._id,
+            name: company.name || null,
+            users: company.users || [],
+            contact: company.contact || { email: '', phone: '' },
+            address: company.address || { street: '', city: '', state: '', zipCode: '', number: '', complement: '' },
+            groups: company.groups || [],
+            deleted: company.deleted || false,
+            createdAt: company.createdAt || null,
+            updatedAt: company.updatedAt || null
+        }));
 
         // Retorna os dados formatados
         return res.status(200).json({

@@ -2,16 +2,16 @@ const redisClient = require('../utils/redisClient');
 const mongoose = require('mongoose');
 const ApiKey = require('../models/ApiKey');
 
-exports.getDeviceEvents = async (req, res) => {
-    const collectionMap = {
-        sigmeter: 'sigmeter_events',
-        sigmeterlora: 'sigmeterlora_events',
-        sigpulse: 'sigpulse_events',
-        sigpark: 'sigpark_events',
-        sigmeteronoff: 'sigmetersl_events',
-        sigmeter4a20: 'sigmeter4a20_events',
-    };
+// Mapeamento de coleções de eventos (banco sighub)
+// sigmeter/sigmeterlora -> sigtemp_events
+// sigpulse -> sigpulse_events
+// sigmeteronoff e sigpark não existem neste banco
+const collectionMap = {
+    sigtemp: 'sigtemp_events',      // sigmeter e sigmeterlora
+    sigpulse: 'sigpulse_events',
+};
 
+exports.getDeviceEvents = async (req, res) => {
     try {
         const { uuid } = req.query;
         const apiKey = req.headers['x-api-key'];
@@ -75,7 +75,8 @@ exports.getDeviceEvents = async (req, res) => {
         for (const [key, collectionName] of Object.entries(collectionMap)) {
             const mongoCollection = mongoose.connection.collection(collectionName);
 
-            const filterQuery = { 'metadata.deviceUUID': uuid };
+            // No novo banco, o campo uuid está diretamente no documento
+            const filterQuery = { uuid: uuid };
 
             if (req.query.start_date && req.query.end_date) {
                 const startDate = new Date(req.query.start_date);
@@ -85,93 +86,46 @@ exports.getDeviceEvents = async (req, res) => {
                     return res.status(400).json({ status: 'error', message: 'Invalid date format. Use ISO 8601.' });
                 }
 
-                filterQuery.timestamp = { $gte: startDate, $lte: endDate };
+                // No novo banco, o timestamp está em metadata.timestamp
+                filterQuery['metadata.timestamp'] = { $gte: startDate, $lte: endDate };
             }
 
             totalRecords = await mongoCollection.countDocuments(filterQuery);
 
             data = await mongoCollection
                 .find(filterQuery)
-                .sort({ timestamp: 1 })
+                .sort({ 'metadata.timestamp': 1 })
                 .skip(skip)
                 .limit(size)
                 .toArray();
 
             if (data.length > 0) {
                 deviceType = key;
-                if (deviceType === 'sigmeter') {
-                    formattedData = data.filter(item => [1, 2, 3, 7].includes(item.metadata.frame))
-                        .map(item => ({
-                            timestamp: item.timestamp,
-                            device_type: 'sigmeter',
-                            device_Id: item.metadata.deviceId,
-                            device_uuid: item.metadata.deviceUUID,
-                            analise: (() => {
-                                switch (item.metadata.frame) {
-                                    case 1: return 'temperatura';
-                                    case 2: return 'contador';
-                                    case 3: return 'parametros';
-                                    case 7: return 'sensor_Id';
-                                }
-                            })(),
-                            umidade_ambiente: item.event.input.data.humidity,
-                            temperatura_ambiente: item.event.input.data.temperature,
-                            temperatura_canal_1: item.event.input.data.temperatureEx1 === -128 ? '' : item.event.input.data.temperatureEx1,
-                            temperatura_canal_2: item.event.input.data.temperatureEx2 === -128 ? '' : item.event.input.data.temperatureEx2,
-                            contagem_canal_1: item.event.input.data.count1,
-                            contagem_canal_2: item.event.input.data.count2,
-                            acumulado_canal_1: item.event.input.data.timeCount1,
-                            acumulado_canal_2: item.event.input.data.timeCount2,
-                            sensorUUID: item.event.input.data.sensorUid,
-                        }));
-                } else if (deviceType === 'sigmeterlora') {
+
+                if (deviceType === 'sigtemp') {
+                    // Formatar eventos sigtemp (sigmeter e sigmeterlora)
                     formattedData = data.map(item => ({
-                        timestamp: item.timestamp,
-                        device_type: 'sigmeterlora',
-                        device_Id: item.metadata.deviceId,
-                        device_uuid: item.metadata.deviceUUID,
+                        timestamp: item.metadata?.timestamp || item.updatedAt,
+                        device_type: 'sigtemp',
+                        device_uuid: item.uuid,
                         analise: 'temperatura',
-                        umidade_ambiente: item.event.input.data.data.ui,
-                        temperatura_ambiente: item.event.input.data.data.ti,
-                        temperatura_canal_1: item.event.input.data.data.tp1,
-                        temperatura_canal_2: item.event.input.data.data.tp2,
-                        sensorUUID_1: item.event.input.data.data.sensorUid1,
-                        sensorUUID_2: item.event.input.data.data.sensorUid2,
-                    }));
-                } else if (deviceType === 'sigmeter4a20') {
-                    formattedData = data.map(item => ({
-                        timestamp: item.timestamp,
-                        device_type: 'sigmeter4a20',
-                        device_Id: item.metadata.deviceId,
-                        device_uuid: item.metadata.deviceUUID,
-                        analise: 'corrente',
-                        miliAmpere: item.event.input.data.mA,
-                        miliVolt: item.event.input.data.mV,
-                        bits_16: item.event.input.data.b16,
-                    }));
-                } else if (deviceType === 'sigmeteronoff') {
-                    formattedData = data.map(item => ({
-                        timestamp: item.timestamp,
-                        device_type: 'sigmeteronoff',
-                        device_Id: item.metadata.deviceId,
-                        device_uuid: item.metadata.deviceUUID,
-                        analise: 'on_off',
-                        status_porta_1: item.event.input.data.s1,
-                        status_porta_2: item.event.input.data.s2,
-                        temperatura_ambiente: item.event.input.data.tmp,
-                        umidade_ambiente: item.event.input.data.hum,
+                        umidade_ambiente: item.metadata?.humidity_ambient || null,
+                        temperatura_ambiente: item.metadata?.temperature_ambient || null,
+                        temperatura_canal_1: item.metadata?.temperature_sensor1 || '',
+                        temperatura_canal_2: item.metadata?.temperature_sensor2 || '',
+                        raw_payload: item.raw_payload || null
                     }));
                 } else if (deviceType === 'sigpulse') {
+                    // Formatar eventos sigpulse
                     formattedData = data.map(item => ({
-                        timestamp: item.timestamp,
+                        timestamp: item.metadata?.timestamp || item.updatedAt,
                         device_type: 'sigpulse',
-                        device_Id: item.metadata.deviceId,
-                        device_uuid: item.metadata.deviceUUID,
+                        device_uuid: item.uuid,
                         analise: 'contador',
-                        contador_porta_1: item.event.input.data.c1,
-                        contador_porta_2: item.event.input.data.c2,
-                        temperatura_ambiente: item.event.input.data.tmp,
-                        umidade_ambiente: item.event.input.data.hum,
+                        contador_porta_1: item.metadata?.counter_channel_1 || 0,
+                        contador_porta_2: item.metadata?.counter_channel_2 || 0,
+                        acumulado_canal_1: item.metadata?.accumulated_channel_1 || 0,
+                        acumulado_canal_2: item.metadata?.accumulated_channel_2 || 0
                     }));
                 }
                 break;

@@ -1,12 +1,12 @@
 const mongoose = require('mongoose');
 const ApiKey = require('../models/ApiKey'); // Modelo para validação da API Key
 
+// Mapeamento de coleções (banco sighub)
+// sigtemp_devices -> sigmeter, sigmeterlora
+// sigpulse_devices -> sigpulse
 const COLLECTIONS = [
-    { name: 'sigmeterloras', deviceType: 'sigmeterlora' },
-    { name: 'sigmeter4a20', deviceType: 'sigmeter4a20' },
-    { name: 'sigmeters', deviceType: 'sigmeter' },
-    { name: 'sigmetersls', deviceType: 'sigmeteronoff' },
-    { name: 'sigpulses', deviceType: 'sigpulse' }
+    { name: 'sigtemp_devices', deviceType: 'sigtemp' },
+    { name: 'sigpulse_devices', deviceType: 'sigpulse' }
 ];
 
 const getAllDevicesResume = async (req, res) => {
@@ -68,7 +68,7 @@ const getAllDevicesResume = async (req, res) => {
         }
 
         // Itera em todas as coleções para buscar dispositivos pelos UUIDs
-        for (const { name: collectionName } of COLLECTIONS) {
+        for (const { name: collectionName, deviceType } of COLLECTIONS) {
             const collection = mongoose.connection.collection(collectionName);
 
             const query = { uuid: { $in: uuids } };
@@ -81,17 +81,45 @@ const getAllDevicesResume = async (req, res) => {
 
             const collectionDevices = await collection.find(query).toArray();
 
+            // Formatar dispositivos para o padrão de saída
             devices.push(
-                ...collectionDevices.map(device => ({
-                    Last_time: device.updatedAt || null,
-                    deviceAlias: device.name || null,
-                    deviceUUID: device.uuid || null,
-                    Battery: device.battery || null,
-                    temp: device.details?.temperature || null,
-                    Temp1: device.details?.temperatureEx1 || null,
-                    Temp2: device.details?.temperatureEx2 || null,
-                    Humidity: device.details?.humidity || null
-                }))
+                ...collectionDevices.map(device => {
+                    // Detectar tipo de dispositivo baseado no vendor
+                    let detectedType = deviceType;
+                    if (collectionName === 'sigtemp_devices') {
+                        detectedType = device.vendor === 'LORA' ? 'sigmeterlora' : 'sigmeter';
+                    }
+
+                    // Estrutura de retorno padrão
+                    const formattedDevice = {
+                        Last_time: device.updatedAt || null,
+                        deviceAlias: device.name || null,
+                        deviceUUID: device.uuid || null,
+                        device_type: detectedType,
+                        vendor: device.vendor || null,
+                        active: device.active || false
+                    };
+
+                    // Campos específicos para sigtemp
+                    if (collectionName === 'sigtemp_devices') {
+                        formattedDevice.temp = device.metadata?.temperature_ambient || null;
+                        formattedDevice.Temp1 = device.metadata?.temperature_sensor1 || null;
+                        formattedDevice.Temp2 = device.metadata?.temperature_sensor2 || null;
+                        formattedDevice.Humidity = device.metadata?.humidity_ambient || null;
+                    }
+
+                    // Campos específicos para sigpulse
+                    if (collectionName === 'sigpulse_devices') {
+                        formattedDevice.Battery = device.battery || null;
+                        formattedDevice.rssi = device.rssi || null;
+                        formattedDevice.counter_channel_1 = device.metadata?.counter_channel_1 || null;
+                        formattedDevice.counter_channel_2 = device.metadata?.counter_channel_2 || null;
+                        formattedDevice.accumulated_channel_1 = device.metadata?.accumulated_channel_1 || null;
+                        formattedDevice.accumulated_channel_2 = device.metadata?.accumulated_channel_2 || null;
+                    }
+
+                    return formattedDevice;
+                })
             );
         }
 

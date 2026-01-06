@@ -2,15 +2,11 @@ const redisClient = require('../utils/redisClient');
 const mongoose = require('mongoose');
 const ApiKey = require('../models/ApiKey');
 
-exports.getDeviceAlerts = async (req, res) => {
-    const collectionMap = {
-        sigmeter: 'alert_events_sigmeters',
-        sigmeteronoff: 'alert_events_sigmeterSLs',
-        sigmeterlora: 'alert_events_sigmeterLORAs',
-        sigpulse: 'alert_events_sigmeterpulses',
-        sigpark: 'alert_events_sigparks',
-    };
+// No banco sighub, apenas sigtemp tem alertas
+// Coleção: sigtemp_alerts
+const ALERTS_COLLECTION = 'sigtemp_alerts';
 
+exports.getDeviceAlerts = async (req, res) => {
     try {
         console.log('Starting getDeviceAlerts function');
         const { uuid, start_date, end_date, page = 1, size = 10, ...otherFilters } = req.query;
@@ -76,52 +72,46 @@ exports.getDeviceAlerts = async (req, res) => {
 
         const skip = (pageNumber - 1) * pageSize;
         let data = [];
-        let alertType = null;
         let totalRecords = 0;
 
-        for (const [key, collectionName] of Object.entries(collectionMap)) {
-            console.log('Checking collection:', collectionName);
-            const mongoCollection = mongoose.connection.collection(collectionName);
+        // No banco sighub, apenas sigtemp_alerts existe
+        console.log('Checking collection:', ALERTS_COLLECTION);
+        const mongoCollection = mongoose.connection.collection(ALERTS_COLLECTION);
 
-            const filterQuery = { uuid };
+        const filterQuery = { uuid };
 
-            if (start_date && end_date) {
-                const startDate = new Date(start_date);
-                const endDate = new Date(end_date);
+        if (start_date && end_date) {
+            const startDate = new Date(start_date);
+            const endDate = new Date(end_date);
 
-                if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-                    console.error('Invalid date format:', { start_date, end_date });
-                    return res.status(400).json({ status: 'error', message: 'Invalid date format. Use ISO 8601.' });
-                }
-
-                filterQuery.createdAt = {
-                    $gte: startDate,
-                    $lte: endDate,
-                };
-                console.log('Date filter applied:', filterQuery.createdAt);
+            if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+                console.error('Invalid date format:', { start_date, end_date });
+                return res.status(400).json({ status: 'error', message: 'Invalid date format. Use ISO 8601.' });
             }
 
-            Object.assign(filterQuery, otherFilters);
-            console.log('Final filter query:', filterQuery);
+            filterQuery.createdAt = {
+                $gte: startDate,
+                $lte: endDate,
+            };
+            console.log('Date filter applied:', filterQuery.createdAt);
+        }
 
-            totalRecords = await mongoCollection.countDocuments(filterQuery);
-            console.log('Total records in collection:', totalRecords);
+        // Aplicar filtros adicionais (type, sensor, etc.)
+        Object.assign(filterQuery, otherFilters);
+        console.log('Final filter query:', filterQuery);
 
-            if (totalRecords > 0) {
-                data = await mongoCollection
-                    .find(filterQuery)
-                    .sort({ createdAt: 1 })
-                    .skip(skip)
-                    .limit(pageSize)
-                    .toArray();
+        totalRecords = await mongoCollection.countDocuments(filterQuery);
+        console.log('Total records in collection:', totalRecords);
 
-                console.log('Data fetched from collection:', data.length);
+        if (totalRecords > 0) {
+            data = await mongoCollection
+                .find(filterQuery)
+                .sort({ createdAt: 1 })
+                .skip(skip)
+                .limit(pageSize)
+                .toArray();
 
-                if (data.length > 0) {
-                    alertType = key;
-                    break;
-                }
-            }
+            console.log('Data fetched from collection:', data.length);
         }
 
         if (!data || data.length === 0) {
@@ -129,9 +119,22 @@ exports.getDeviceAlerts = async (req, res) => {
             return res.status(404).json({ status: 'error', message: 'No alerts found for the specified UUID' });
         }
 
+        // Formatar alertas para o padrão de saída
         const formattedData = data.map(item => ({
-            ...item,
-            alertType,
+            _id: item._id,
+            uuid: item.uuid,
+            message: item.message || null,
+            type: item.type || null,           // HIGH, LOW, etc.
+            sensor: item.sensor || null,       // temperature_ambient, etc.
+            eventValue: item.eventValue || null,
+            thresholdMax: item.thresholdMax || null,
+            thresholdMin: item.thresholdMin || null,
+            createdAt: item.createdAt || null,
+            email_status_code: item.email_status_code || null,
+            eventID: item.eventID || null,
+            annotation: item.annotation || null,
+            user_note: item.user_note || null,
+            alertType: 'sigtemp'
         }));
         console.log('Formatted data:', formattedData.length);
 

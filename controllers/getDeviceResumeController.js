@@ -1,17 +1,18 @@
 const mongoose = require('mongoose');
 const ApiKey = require('../models/ApiKey'); // Modelo para validação da API Key
 
+// Mapeamento de coleções (banco sighub)
+// sigmeter/sigmeterlora -> sigtemp_devices
+// sigpulse -> sigpulse_devices
+// sigmeteronoff e sigpark não existem neste banco
 const COLLECTIONS = [
-    { name: 'sigmeterloras', deviceType: 'sigmeterlora' },
-    { name: 'sigmeter4a20', deviceType: 'sigmeter4a20' },
-    { name: 'sigmeters', deviceType: 'sigmeter' },
-    { name: 'sigmetersls', deviceType: 'sigmeteronoff' },
-    { name: 'sigpulses', deviceType: 'sigpulse' }
+    { name: 'sigtemp_devices', deviceTypes: ['sigmeter', 'sigmeterlora'] },
+    { name: 'sigpulse_devices', deviceTypes: ['sigpulse'] }
 ];
 
 const getDeviceResume = async (req, res) => {
     try {
-        const { uuid, name, _id } = req.query;
+        const { uuid, name, _id, device_type } = req.query;
         const apiKey = req.headers['x-api-key'];
         const companyId = req.headers['x-company-id'];
 
@@ -43,19 +44,45 @@ const getDeviceResume = async (req, res) => {
         let companyData = null;
 
         // Itera em todas as coleções
-        for (const { name: collectionName, deviceType } of COLLECTIONS) {
+        for (const { name: collectionName, deviceTypes } of COLLECTIONS) {
             const collection = mongoose.connection.collection(collectionName);
             const data = await collection.findOne(searchQuery);
 
             if (data) {
-                // Monta os dados do dispositivo
+                // Determinar o device_type baseado no vendor ou parâmetro
+                let detectedDeviceType = deviceTypes[0]; // default
+                if (device_type && deviceTypes.includes(device_type)) {
+                    detectedDeviceType = device_type;
+                } else if (data.vendor === 'LORA') {
+                    detectedDeviceType = 'sigmeterlora';
+                } else if (data.vendor === 'NBIOT' && collectionName === 'sigtemp_devices') {
+                    detectedDeviceType = 'sigmeter';
+                } else if (collectionName === 'sigpulse_devices') {
+                    detectedDeviceType = 'sigpulse';
+                }
+
+                // Monta os dados do dispositivo no formato padrão de saída
                 deviceData = {
                     uuid: data.uuid || null,
                     alias: data.name || null,
                     id: data._id || null,
-                    device_type: deviceType,
-                    createdAt: data.createdAt || null
+                    device_type: detectedDeviceType,
+                    vendor: data.vendor || null,
+                    firmware_version: data.firmware_version || null,
+                    active: data.active || false,
+                    createdAt: data.createdAt || null,
+                    updatedAt: data.updatedAt || null,
+                    metadata: data.metadata || null,
+                    company: data.company || null
                 };
+
+                // Adiciona campos específicos de sigpulse
+                if (collectionName === 'sigpulse_devices') {
+                    deviceData.battery = data.battery || null;
+                    deviceData.rssi = data.rssi || null;
+                    deviceData.inicialValue = data.inicialValue || 0;
+                    deviceData.multiplier = data.multiplier || 1;
+                }
 
                 // Busca o grupo correspondente
                 const groupsCollection = mongoose.connection.collection('groups');

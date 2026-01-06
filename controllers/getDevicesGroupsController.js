@@ -2,6 +2,7 @@ const paginateQuery = require('../utils/paginateQuery');
 const ApiKey = require('../models/ApiKey');
 const mongoose = require('mongoose');
 
+// Coleção: groups (banco sighub)
 exports.getGroups = async (req, res) => {
     try {
         const mongoGroups = mongoose.connection.collection('groups');
@@ -40,6 +41,7 @@ exports.getGroups = async (req, res) => {
         }
 
         // Configuração de filtros para busca nos grupos
+        // No novo banco, company_id é ObjectId
         const filterQuery = { company_id: new mongoose.Types.ObjectId(companyId) };
         if (req.query['devices.uuid']) filterQuery['devices.uuid'] = req.query['devices.uuid'];
         if (req.query['devices.id']) filterQuery['devices.id'] = req.query['devices.id'];
@@ -49,18 +51,16 @@ exports.getGroups = async (req, res) => {
         const size = parseInt(req.query.size || 10);
         const { data, pagination } = await paginateQuery(mongoGroups, filterQuery, page, size);
 
-        // Formatação dos dados de grupos e dispositivos
+        // Formatação dos dados de grupos e dispositivos (mantendo formato de saída)
         const formattedGroups = data.map((group) => ({
             id: group._id || null,
             nome: group.name || null,
+            descricao: group.description || null,
             device_type: group.device_type || null,
-            devices: group.devices
-                ? group.devices.map((device) => ({
-                      uuid: device.uuid || null,
-                      id: device.id || null,
-                  }))
-                : [],
+            devices: group.devices || [],
+            deleted: group.deleted || false,
             createdAt: group.createdAt || null,
+            updatedAt: group.updatedAt || null,
         }));
 
         // Resposta final com dados formatados
